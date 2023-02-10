@@ -1,0 +1,388 @@
+# Prediction for stage 1 of landing of Falcon 9
+
+
+
+## capstone project
+It will be predicted if the first stages of falcon 9 is usable again or not. so we should be sure if the landing is successful or not. It is important to know the reusibility of stages because the cost of landing of other providers are about 165 million dollar however Space X spends about 62 and defintely it will be useful for new entrance.
+the data will be collected from API.
+the problem is classification supervised learning.
+
+Perform exploratory  Data Analysis and determine Training Labels
+
+*   create a column for the class Y
+*   Standardize the data X
+*   Split into training data and test data
+
+Find tuned Hyperparameter for SVM, Classification Trees and Logistic Regression
+
+*   Find the method by using grid search for test data 
+
+#import the library of request for collecting data from API and 
+import requests
+#  for data manipulation and analysis
+import pandas as pd
+# NumPy is a library for the Python programming language, adding support for large, multi-dimensional arrays and matrices, along with a large collection of high-level mathematical functions to operate on these arrays
+import numpy as np
+# Datetime is a library that allows us to represent dates
+import datetime
+
+#for visulization
+import seaborn as sns
+import matplotlib.pyplot as plt
+# for cleansing
+from sklearn.preprocessing import LabelEncoder
+#slpit dataset
+from sklearn.model_selection import train_test_split
+#standardization
+
+from sklearn import preprocessing
+#modeling
+from sklearn.linear_model import LogisticRegression
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.tree import DecisionTreeClassifier  
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.svm import SVC
+
+
+#optimizated parameters
+from sklearn.model_selection import GridSearchCV
+
+#Evaluation
+from sklearn.metrics import confusion_matrix
+from sklearn.metrics import accuracy_score
+from sklearn.metrics import classification_report
+
+
+
+
+def heat_confusion(ytest,pre):
+    cm=confusion_matrix(ytest,pre)
+    ax= plt.subplot()
+    sns.heatmap(cm, annot=True, ax = ax); #annot=True to annotate cells
+    ax.set_xlabel('Predicted labels')
+    ax.set_ylabel('True labels')
+    ax.set_title('Confusion Matrix'); 
+    ax.xaxis.set_ticklabels(['did not land', 'land']); ax.yaxis.set_ticklabels(['did not land', 'landed'])
+
+##### request launch data from SpaceX API with URL:
+
+
+responses=requests.get("https://api.spacexdata.com/v4/launches/past")
+responses
+
+# check the contents
+responses.content
+
+type(responses)
+
+# decode the responces from request model to json
+responses.json()
+
+#convert json model to pandas dataframe
+df=pd.json_normalize(responses.json())
+df
+
+df=pd.read_csv("dataset_falcon9 (4).csv")
+df.head()
+
+df.info()
+
+df.isnull().sum()
+
+### Exploratory data analysis(EDA)
+This phase is important to figure out the data undrestanding, for last column "Class" it is our target and shows the success of langing if it is equal to one otherwise it is zero. Regarding to other features which have impact on it we want to predict 1 or 0. 
+
+Orbit is considered as informative column to predict. it includes the data of entering rockets to which orbits.
+Launchsite is the loction of landing.
+Outcome/True are the successful category.
+
+We can omit thses 3 columns:
+* LaunchSite, Latitude and Longitude are meaning the same. so it is possible to keep just one of them. rember all the time we should just keep one of the same columns and remove the others.infact they the same value.
+* Boosterversion is identical for all flightnumbers.
+* Serial do not give particular information.
+
+
+sns.countplot(df['Class'])
+
+
+#
+bool_features=df.dtypes==bool
+bool_features = df.columns[bool_features].tolist()
+bool_features
+
+for i in range(len(bool_features)):
+    df[bool_features[i]].value_counts().plot(kind='bar',subplots=True,figsize=(5,2))
+    plt.xticks(rotation='vertical')
+    plt.ylabel(bool_features[i]) 
+    plt.show()
+
+
+df=df.drop('Date',axis=1)
+
+categorical_feat=df.dtypes==object 
+categorical_feat=df.columns[categorical_feat].tolist()
+categorical_feat
+
+#use for categorical data
+for i in range (len(categorical_feat)):
+    df[categorical_feat[i]].value_counts().plot(kind="bar")
+    plt.ylabel(categorical_feat[i]) 
+    plt.show()
+
+
+df["BoosterVersion"]
+
+# not important information due to its identical data in column
+set(df["BoosterVersion"])
+
+df["PayloadMass"].describe()
+
+
+df["PayloadMass"].plot(kind='kde',subplots=True,figsize=(16,8),layout=(2,3), sharex=False)
+
+# use for numerical data
+df.hist(figsize=[10,8])
+
+df.shape
+
+df=df.drop(['BoosterVersion','Latitude','Longitude'],axis=1)
+
+df.info()
+
+### Visulize the relationship between Flight Numbers and Payload Mass, Launchsite
+
+sns.catplot(y='PayloadMass',x='Orbit',hue="Class",data=df,aspect=1)
+plt.xlabel('Orbit',fontsize=20)
+plt.ylabel('PayLoad Mass',fontsize=20)
+plt.show()
+
+sns.catplot(y='FlightNumber',x='LaunchSite',data=df,hue='Class',aspect=5)
+plt.xlabel('Flight Number')
+plt.ylabel('LaunchSite')
+plt.show()
+
+#the most landing in the first site 
+sns.catplot(y='PayloadMass',x='LaunchSite',hue="Class",data=df,aspect=5)
+plt.xlabel('LaunchSite',fontsize=20)
+plt.ylabel('PayLoad Mass',fontsize=20)
+plt.show()
+
+## Preprocessing and Cleansing
+#### dealing with missing data
+
+* regarding to the domain knowlegde filling out LaunchSite, we can not filling out by max count from value count becuse the max frequency of landing pad is "5e9e3032383ecb6bb234e7ca " however the Orbit is related to this value is VLEO but there are also other orbit for this value. so max count for filling out is not good solution. we can not be sure about the accuracy of VELO for the all orbits of 5e9e3032383ecb6bb234e7ca. so thecnical and domain knowlegde will help.
+
+df.describe()
+
+
+df['LandingPad'].value_counts()
+
+df['LandingPad']=df['LandingPad'].fillna(df['LandingPad'].mode()[0])
+
+df['LandingPad'].value_counts()
+
+df[['LandingPad','Orbit']]
+
+
+### Coverting qualitatives to quantitatives
+
+# converting categorical value to numerical
+
+for i in df.columns:
+    if df[i].dtypes==object:
+        le=LabelEncoder()
+        df[i]=le.fit_transform(df[i])
+df.head(90)    
+
+
+
+df.shape
+
+df['GridFins']=df['GridFins'].astype(int)
+df['Reused']=df['Reused'].astype(int)
+df['Legs']=df['Legs'].astype(int)   
+df
+
+df1=df.drop('Class',axis=1)
+df1
+
+#standardization
+# Preprocessing allows us to standarsize our data
+from sklearn import preprocessing
+transform = preprocessing.StandardScaler()
+x_scaled = transform.fit_transform(df1)
+X_df1 = pd.DataFrame(x_scaled,index=df1.index,columns=df1.columns)
+X_df1
+
+df_preproccessd=pd.concat([X_df1,df['Class']],axis=1)
+df_preproccessd
+
+
+
+## Train/Test Split & Normalization
+these are a supervised learning for classification:
+* LogisticModel
+* K nearest neighbors(KNN)
+* SVM
+** Use the function train_test_split to split the data X and Y into training and test data. Set the parameter test_size to 0.2 and random_state to 10. The training data and test data should be assigned to the following labels.
+
+X=df_preproccessd.drop('Class',axis=1)
+Y=df_preproccessd['Class']
+
+X_train,X_test,Y_train,Y_test=train_test_split(X,Y,test_size=0.2, random_state=10)
+
+Create a logistic regression object using then create a  GridSearchCV object  <code>logreg_cv</code> with cv = 10.  Fit the object to find the best parameters from the dictionary <code>param0</code>.
+
+
+#Logisticregression
+logmodel=LogisticRegression()
+param0={'C':[.001,.01,.1]}
+logreg_cv=GridSearchCV(logmodel,param0,cv=10)
+
+
+logreg_cv.fit(X_train,Y_train)
+
+We output the GridSearchCV object for logistic regression. We display the best parameters using the data attribute best_params_ and the accuracy on the validation data using the data attribute best_score_.
+
+print(logreg_cv.best_params_)
+print(logreg_cv.best_score_)
+
+logreg_cv.score(X_test,Y_test)
+
+pred0=logreg_cv.predict(X_test)
+
+print(accuracy_score(Y_test,pred0))
+print(classification_report(Y_test,pred0))
+
+heat_confusion(Y_test,pred0)
+
+accuracy=[]
+methods=[]
+accuracy.append(logreg_cv.score(X_test,Y_test))
+methods.append('LogReg_cv')
+logreg_cv.score(X_test,Y_test)
+
+#KNN alogrithem
+knn=KNeighborsClassifier(n_neighbors=9)
+parameters={'n_neighbors':[1,2,4,5,7,8,9,10]}
+#tuned hyperparameters
+knn=GridSearchCV(knn,parameters)
+knn.fit(X_train,Y_train)
+
+print("tuned hyperparameters:(best parameters)", knn.best_params_, knn.best_score_)
+
+knn.score(X_test,Y_test)
+
+
+pred1=knn.predict(X_test)
+
+print(confusion_matrix(Y_test,pred1),classification_report(Y_test,pred1),accuracy_score(Y_test,pred1))
+
+heat_confusion(Y_test,pred1)
+
+
+accuracy.append(knn.score(X_test,Y_test))
+methods.append('KNN')
+knn.score(X_test,Y_test)
+
+#Desion Tree
+parameters = {'criterion': ['gini', 'entropy'],
+     'splitter': ['best', 'random'],
+     'max_features': ['auto', 'sqrt'],
+     'min_samples_leaf': [1,2, 4],
+     'min_samples_split': [3, 6, 10]}
+
+tree = DecisionTreeClassifier()
+
+
+
+tree_cv = GridSearchCV(tree, parameters, cv = 10)
+tree_cv.fit(X_train, Y_train)
+
+
+
+print("tuned hpyerparameters :(best parameters) ",tree_cv.best_params_)
+print("accuracy :",tree_cv.best_score_)
+
+tree_cv.score(X_test,Y_test)
+
+pred3=tree_cv.predict(X_test)
+
+print((pred3)
+      ,Y_test)
+
+confusion_matrix(Y_test,pred3)
+
+accuracy_score(Y_test,pred3)
+
+heat_confusion(Y_test,pred3)
+
+
+accuracy.append(tree_cv.score(X_test,Y_test))
+methods.append('DT')
+tree_cv.score(X_test,Y_test)
+
+#Random forest
+from sklearn.ensemble import RandomForestClassifier
+param_rf={'criterion': ['gini', 'entropy'],
+     'min_samples_leaf': [ 2, 4],
+     'min_samples_split': [2,5, 8]}
+RFC=RandomForestClassifier()
+
+rf_cv=GridSearchCV(RFC,param_rf,cv=3)
+rf_cv.fit(X_train,Y_train)
+
+print(rf_cv.best_params_,rf_cv.best_score_)
+
+pred4=rf_cv.predict(X_test)
+
+print(Y_test,pred4)
+
+confusion_matrix(Y_test,pred4)
+
+heat_confusion(Y_test,pred4)
+
+
+accuracy.append(rf_cv.score(X_test,Y_test))
+methods.append('RF')
+rf_cv.score(X_test,Y_test)
+
+#SVM model
+svm=SVC()
+
+param_svm={'C':[0.25,.5,1.5],'kernel': ['poly', 'rbf', 'sigmoid']}
+
+svm_cv=GridSearchCV(svm,param_svm)
+svm_cv.fit(X_train,Y_train)
+
+svm_cv.best_params_
+
+svm_cv.best_score_
+
+pred5=svm_cv.predict(X_test)
+
+print(confusion_matrix(Y_test,pred5),accuracy_score(Y_test,pred5))
+
+accuracy_score(Y_test,pred5)
+
+heat_confusion(Y_test,pred5)
+
+
+accuracy.append(svm_cv.score(X_test,Y_test))
+methods.append('SVM')
+svm_cv.score(X_test,Y_test)
+
+Find the method performs best:
+
+
+print(methods,accuracy)
+
+# creating the bar plot
+plt.bar(methods, accuracy, color ='maroon',
+        width = 0.4)
+ 
+plt.xlabel("Methods")
+plt.ylabel("Accuracy")
+plt.title("Best Perfomed Method")
+plt.show()
+
